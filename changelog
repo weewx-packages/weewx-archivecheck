@@ -1,0 +1,7 @@
+0.1.1 (2026-10-29)
+  First standalone release.
+  Inspect field coverage, archive alignment and example rows from a SQLite snapshot.
+  Preview per-field aggregation and record transfers with conflict checks.
+  Save verified permanent backups before exporting corrected copies.
+  Rebuild affected scalar daily summaries while preserving other observations.
+  Include a dark web interface, paginated previews and standalone HTML/JSON reports.

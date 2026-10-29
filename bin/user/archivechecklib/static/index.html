@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a1220">
+  <meta name="archive-token" content="__SESSION_TOKEN__">
+  <title>Archivecheck · WeeWX archive inspector</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#overview"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 36 36"><circle class="weather-sun" cx="24" cy="10" r="4.5"/><path class="weather-sun" d="M24 2v1M31 5l-1 1M32 12h-1"/><path d="M10 23h15a5 5 0 0 0 .5-10 7.5 7.5 0 0 0-14.4-2A6 6 0 0 0 10 23ZM12 27v3m6-3v5m6-5v3"/></svg></span> Archivecheck <span class="brand-context">for WeeWX</span></a>
+    <nav aria-label="Sections"><a href="#instructions">Instructions</a><a href="#alignment">Alignment</a><a href="#observations">Observations</a><a href="#merge">Dry run</a></nav>
+    <span class="snapshot-badge"><span aria-hidden="true"></span> Snapshot</span>
+  </header>
+  <main>
+    <details id="instructions" class="panel instructions" open>
+      <summary>How to use Archivecheck</summary>
+      <ol>
+        <li><h3>Inspect the archive</h3><p>The interface reads a fixed snapshot taken when the server starts. The station can keep recording. In <a href="#alignment">Alignment</a>, check which fields have values between archive boundaries and compare the example rows. An offset alone does not establish which record a reading belongs to. All displayed timestamps and date filters use UTC.</p></li>
+        <li><h3>Choose the fields</h3><p>Use <a href="#observations">Observation values</a> to inspect a field's values and coverage. In the Fields table, check Transfer for each numeric field you want to move. In <a href="#merge">Merge records</a>, choose a different Weather field that is populated in destination rows, for example an outdoor temperature field. No fields or aggregation methods are selected automatically.</p></li>
+        <li><h3>Set the destination</h3><p>Check the Archive interval and Maximum shift in seconds. Previous and Next match the preceding or following grid boundary; Nearest chooses the closest boundary. Nearest weather record matches an actual row containing the Weather field. Grid boundaries align to Unix epoch. A destination row must already exist. Equal-distance ties are conflicts; readings beyond the Maximum shift stay unchanged. Use Date range to limit the correction.</p></li>
+        <li><h3>Handle multiple readings</h3><p>Choose an optional Aggregation method directly in the Fields table. Choosing a method also checks Transfer for that field. Uncheck Transfer to exclude it. Without a method, multiple readings for the field cause a conflict. Mean gives each sample equal weight. Last keeps the newest reading, useful for a cumulative counter. Sum adds per-period amounts. First, Minimum and Maximum are also available. The Weather field identifies destination rows and cannot be transferred.</p></li>
+        <li><h3>Review the dry run</h3><p>Run dry run checks all candidates without modifying the archive. The preview shows up to 200 destination groups, with conflicts first and 20 groups per page. Use Show and Per page to filter and browse. Check timestamps, before and after values, and what remains in each source row. Missing destinations, incompatible units and differing existing destination values cause conflicts. Changed settings require a new dry run.</p></li>
+        <li><h3>Export the correction</h3><p>Create corrected copy first saves and verifies a permanent backup of the complete snapshot, then applies the reviewed changes to a new database and rebuilds affected scalar daily summaries in the configured station timezone. The original database stays unchanged. In the copy, transferred source values are cleared; rows with other observations remain. If conflicts exist, explicitly choose Skip blocked rows to export only ready changes.</p><p>Download the corrected database before stopping the server. Backups remain in archivecheck-backups beside the source database, unless another backup directory was configured; the interface shows the path and download link. Create backup also works without a dry run. Save HTML or Save JSON exports the analysis and current dry run for review.</p></li>
+      </ol>
+    </details>
+    <section id="overview" class="intro">
+      <div class="source-card"><svg class="archive-isobars" viewBox="0 0 500 180" aria-hidden="true"><path d="M55 200C-5 105 45-32 175-35S288 62 403 28 562 34 555 168M102 200C41 112 82 1 177 1s121 97 229 62 112 17 118 105M155 200C94 122 113 37 183 37s125 88 216 61 83 29 82 83M207 200C145 140 145 76 193 76s125 65 200 54 44 44 45 70"/></svg><div class="source-details"><h1 id="source-name">Loading archive…</h1><span id="source-table"></span></div><div class="report-actions"><button id="download-html" class="button quiet" type="button">Save HTML</button><button id="download-json" class="button quiet" type="button">Save JSON</button><button id="create-backup" class="button quiet" type="button">Create backup</button></div></div>
+    </section>
+    <p id="status" class="status" role="status" aria-live="polite">Inspecting the archive…</p>
+    <div id="error" class="error" role="alert" hidden></div>
+    <div id="backup-result" class="backup-result" role="status" hidden></div>
+    <section class="metrics" aria-label="Archive summary">
+      <article><span class="small-label">ARCHIVE RECORDS</span><strong id="record-count">—</strong><span id="date-range">—</span></article>
+      <article><span class="small-label">OBSERVATIONS</span><strong id="field-count">—</strong></article>
+      <article><span class="small-label">ARCHIVE GRID</span><strong id="interval-value">—</strong><span id="interval-note">Most frequent recorded interval</span></article>
+      <article><a href="#alignment"><span class="small-label">OFF-GRID RECORDS</span><strong id="off-grid-count">—</strong></a></article>
+    </section>
+    <section id="alignment" class="panel alignment-panel">
+      <div class="panel-heading"><h2>Alignment</h2><a id="alignment-dry-run" href="#merge">Configure dry run</a></div>
+      <p id="alignment-summary"></p>
+      <div id="alignment-field-counts" class="alignment-field-counts"></div>
+      <div id="alignment-examples" class="table-scroll" hidden><table><caption>Example archive rows</caption><thead><tr><th scope="col">Timestamp, UTC</th><th scope="col">Offset</th><th scope="col">Stored values</th></tr></thead><tbody id="alignment-rows"></tbody></table></div>
+    </section>
+    <section id="observations" class="inspection-grid">
+      <article class="panel chart-panel">
+        <div class="panel-heading"><h2>Observation values</h2><label class="field-picker"><select id="chart-field" aria-label="Observation to inspect"></select></label></div>
+        <div class="chart-legend"><span><i class="legend-dot"></i> Min / max</span><span>UTC</span></div>
+        <svg id="value-chart" viewBox="0 0 720 190" role="img" aria-label="Observation values over time"></svg>
+        <div id="coverage-chart" class="coverage-chart" role="img" aria-label="Non-NULL observations per time bucket"></div>
+        <div id="chart-dates" class="chart-dates"></div>
+        <div id="field-stats" class="field-stats"></div>
+      </article>
+      <article class="panel timing-panel">
+        <h2>Timestamp offsets</h2>
+        <div id="offset-bars" class="offset-bars"></div>
+        <dl class="checks"><div><dt>Gaps longer than the recorded interval</dt><dd id="gap-count">—</dd></div><div><dt>Rows closer than the recorded interval</dt><dd id="short-count">—</dd></div><div><dt>Unit systems</dt><dd id="unit-systems">—</dd></div><div><dt>SQLite integrity</dt><dd id="integrity-value">—</dd></div></dl>
+      </article>
+    </section>
+    <section id="fields" class="panel fields-panel">
+      <div class="panel-heading"><h2>Fields</h2><span id="selected-count" class="pill">0 selected</span></div>
+      <p class="help">Aggregation is optional. Choosing a method selects the field for transfer.</p>
+      <div class="table-scroll"><table><thead><tr><th scope="col">Transfer</th><th scope="col">Observation</th><th scope="col">Stored values</th><th scope="col">Off grid</th><th scope="col">Missing values</th><th scope="col">Coverage</th><th scope="col">Storage type</th><th scope="col">Aggregation</th></tr></thead><tbody id="field-rows"></tbody></table></div>
+    </section>
+    <section id="merge" class="panel merge-panel">
+      <div class="panel-heading"><h2>Merge records</h2></div>
+      <form id="merge-form">
+        <div class="form-grid"><label>Weather field<select id="anchor" required></select><span>Required in destination rows.</span></label><label>Archive interval, seconds<input id="merge-interval" type="number" value="300" min="1" step="1" required></label><label>Maximum shift, seconds<input id="tolerance" type="number" value="15" min="0" step="1" required></label><label>Destination<select id="direction" required><option value="">Choose…</option><option value="previous">Previous archive boundary</option><option value="next">Next archive boundary</option><option value="nearest">Nearest archive boundary</option><option value="record">Nearest weather record</option></select></label></div>
+        <details class="matching-help help"><summary>Matching and aggregation rules</summary><p>Boundaries align to Unix epoch. Readings outside the maximum shift stay unchanged. Equal distances to two destinations cause a conflict.</p><p>Without an aggregation method, multiple readings remain conflicts. Mean gives each sample equal weight. Use last for counters and sum for per-period amounts. Existing destination values must agree with the result.</p></details>
+        <details class="date-filter"><summary>Date range</summary><div class="form-grid"><label>From, UTC<input id="plan-start" type="datetime-local" step="1"></label><label>Through, UTC<input id="plan-stop" type="datetime-local" step="1"></label></div></details>
+        <div class="form-footer"><p id="timezone-note" class="help"></p><button id="run-plan" class="button primary" type="submit">Run dry run</button></div>
+      </form>
+      <p id="saved-report-note" class="help" hidden>Saved report. Open the local interface to change settings or export.</p>
+      <div id="plan-result" hidden>
+        <div class="plan-metrics"><div><span>Ready to merge</span><strong id="plan-ready">0</strong></div><div><span>Blocked candidates</span><strong id="plan-blocked">0</strong></div><div><span>Source rows removed</span><strong id="plan-deleted">0</strong></div><div><span>Source rows retained</span><strong id="plan-retained">0</strong></div></div>
+        <p id="plan-description" class="help"></p><div id="reason-list" class="reason-list"></div>
+        <div id="preview-controls" class="preview-toolbar"><label>Show<select id="preview-filter"><option value="all">All preview groups</option><option value="blocked">Conflicts</option><option value="ready">Ready to merge</option></select></label><label>Per page<select id="preview-page-size"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option></select></label><span id="preview-range" role="status" aria-live="polite"></span></div>
+        <div class="table-scroll"><table class="preview-table"><thead><tr><th scope="col">Outcome</th><th scope="col">Source time → destination time, UTC</th><th scope="col">Destination before → after</th><th scope="col">Source after transfer</th></tr></thead><tbody id="preview-rows"></tbody></table></div>
+        <nav id="preview-pagination" class="preview-pagination" aria-label="Preview pages"><button id="preview-previous" class="button quiet" type="button">Previous</button><span id="preview-page"></span><button id="preview-next" class="button quiet" type="button">Next</button></nav>
+        <p id="preview-note" class="help"></p>
+        <div id="export-panel" class="export-panel"><div><h3>Export</h3><p>Saves a backup first. Applies changes and rebuilds affected daily summaries in a copy.</p><label id="ready-only-label" class="checkbox-label" hidden><input id="ready-only" type="checkbox"> Skip blocked rows</label></div><button id="export-copy" class="button primary" type="button" disabled>Create corrected copy</button></div>
+        <div id="export-result" class="export-result" role="status" hidden></div>
+      </div>
+    </section>
+    <footer><span>Archivecheck <span id="version">0.1.1</span></span></footer>
+  </main>
+</body>
+</html>
