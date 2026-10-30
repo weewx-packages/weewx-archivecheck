@@ -14,6 +14,7 @@ import sys
 import time
 
 from . import __version__
+from . import mysqlsource
 from .archive import Archive, analyze, create_backup, export_copy, field_details, plan_merge, public_plan, snapshot
 from .web import render_report, serve
 
@@ -45,9 +46,19 @@ def parse_timestamp(value, end_of_day=False):
 
 
 def resolve_source(namespace):
-    """Resolve a direct SQLite path or a configured WeeWX binding."""
+    """Resolve a direct SQLite path or a configured WeeWX binding.
+
+    Args:
+        namespace (argparse.Namespace): Parsed command-line options.
+
+    Returns:
+        tuple[str|dict, str, str]: A three-way tuple (source, table, directory). The source
+            is a SQLite path, or the WeeWX database dictionary of a MySQL archive. The
+            default archivecheck-backups directory is created in directory.
+    """
     if namespace.database:
-        return os.path.expanduser(namespace.database), namespace.table or 'archive'
+        path = os.path.expanduser(namespace.database)
+        return path, namespace.table or 'archive', os.path.dirname(os.path.abspath(path))
     try:
         import weecfg
         import weewx.manager
@@ -60,10 +71,14 @@ def resolve_source(namespace):
         database = weewx.manager.get_database_dict_from_config(config, binding['database'])
     except KeyError as error:
         raise ValueError('The requested database binding is incomplete.') from error
+    table = namespace.table or binding.get('table_name', 'archive')
+    if database.get('driver') == 'weedb.mysql':
+        # MySQL has no file to put backups beside, so they go beside weewx.conf.
+        return dict(database), table, os.path.dirname(os.path.abspath(config_path))
     if database.get('driver') != 'weedb.sqlite':
-        raise ValueError('Archivecheck currently supports SQLite archives. Use a SQLite export.')
-    return (os.path.join(database.get('SQLITE_ROOT', ''), database['database_name']),
-            namespace.table or binding.get('table_name', 'archive'))
+        raise ValueError('Archivecheck supports SQLite and MySQL archives.')
+    path = os.path.join(database.get('SQLITE_ROOT', ''), database['database_name'])
+    return path, table, os.path.dirname(os.path.abspath(path))
 
 
 def write_text(path, content):
@@ -118,16 +133,21 @@ def create_demo(path):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description='Inspect WeeWX SQLite archives and dry-run scalar merges.')
+    parser = argparse.ArgumentParser(description='Inspect WeeWX SQLite and MySQL archives and dry-run scalar merges.')
     parser.add_argument('--version', action='version', version=__version__)
     commands = parser.add_subparsers(dest='command')
-    for command in ('analyze', 'serve', 'dry-run', 'export', 'backup'):
+    for command in ('analyze', 'serve', 'dry-run', 'export', 'backup', 'copy-to-mysql'):
         subparser = commands.add_parser(command)
         source = subparser.add_mutually_exclusive_group(required=True)
         source.add_argument('--database', help='Path to a SQLite archive.')
-        source.add_argument('--config', help='Path to weewx.conf; uses its SQLite binding.')
+        source.add_argument('--config', help='Path to weewx.conf; uses its SQLite or MySQL binding.')
         subparser.add_argument('--binding', default='wx_binding')
         subparser.add_argument('--table', help='Archive table; defaults to archive or the configured table.')
+        if command == 'copy-to-mysql':
+            subparser.add_argument('--input', required=True, help='Corrected SQLite copy from an export.')
+            subparser.add_argument('--target', required=True,
+                                   help='Existing, empty MySQL database for the corrected tables.')
+            continue
         subparser.add_argument('--from', dest='start', help='Inclusive UTC date/time or epoch seconds.')
         subparser.add_argument('--to', dest='stop', help='Inclusive UTC date/time or epoch seconds.')
         subparser.add_argument('--timezone', help='Station timezone for daily summaries, e.g. Europe/Berlin. '
@@ -182,6 +202,13 @@ def main(argv=None):
             create_demo(namespace.output)
             print('Created synthetic archive: %s' % namespace.output)
             return
+        if namespace.command == 'copy-to-mysql':
+            source, table, directory = resolve_source(namespace)
+            if not isinstance(source, dict):
+                raise ValueError('copy-to-mysql needs --config with a MySQL binding.')
+            result = mysqlsource.copy_to_mysql(namespace.input, source, table, namespace.target)
+            print(json.dumps(result, indent=2, allow_nan=False))
+            return
         if namespace.timezone:
             if not hasattr(time, 'tzset'):
                 raise ValueError('--timezone requires time.tzset on this platform.')
@@ -193,19 +220,24 @@ def main(argv=None):
                 raise ValueError('Unknown station timezone %r.' % namespace.timezone)
             os.environ['TZ'] = namespace.timezone
             time.tzset()
-        source, table = resolve_source(namespace)
+        source, table, directory = resolve_source(namespace)
+        if isinstance(source, dict):
+            name = '%s (MySQL)' % source['database_name']
+            source_snapshot = mysqlsource.snapshot(source, table)
+        else:
+            name = os.path.basename(source)
+            source_snapshot = snapshot(source)
         backup_directory = getattr(namespace, 'backup_dir', None) or os.path.join(
-            os.path.dirname(os.path.abspath(source)), 'archivecheck-backups')
+            directory, 'archivecheck-backups')
         start = parse_timestamp(namespace.start)
         stop = parse_timestamp(namespace.stop, end_of_day=True)
-        with snapshot(source) as path:
+        with source_snapshot as path:
             if namespace.command == 'serve':
-                serve(path, os.path.basename(source), table, start, stop, namespace.port,
-                      backup_directory, namespace.host)
+                serve(path, name, table, start, stop, namespace.port, backup_directory, namespace.host)
                 return
             with Archive(path, table, start, stop) as archive:
                 if namespace.command == 'backup':
-                    result = create_backup(archive, backup_directory, os.path.basename(source))
+                    result = create_backup(archive, backup_directory, name)
                     print(json.dumps(result, indent=2, allow_nan=False))
                     return
                 if namespace.command == 'export':
@@ -213,10 +245,10 @@ def main(argv=None):
                         saved = json.load(plan_file)
                     plan = saved.get('plan', saved)
                     result = export_copy(archive, plan, namespace.output, namespace.ready_only,
-                                         backup_directory, os.path.basename(source))
+                                         backup_directory, name)
                     print(json.dumps(result, indent=2, allow_nan=False))
                     return
-                report = analyze(archive, os.path.basename(source))
+                report = analyze(archive, name)
                 field = getattr(namespace, 'field', None)
                 if field is None:
                     field = 'energyprod' if 'energyprod' in archive.observations else next(

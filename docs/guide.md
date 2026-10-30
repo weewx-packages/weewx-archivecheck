@@ -1,7 +1,7 @@
 # Inspecting an archive with Archivecheck
 
 Archivecheck helps you investigate missing observations, timestamp offsets and
-separately imported records in a WeeWX SQLite database. It produces shareable
+separately imported records in a WeeWX SQLite or MySQL database. It produces shareable
 reports and previews corrections before exporting a new database file.
 
 The tool reads a consistent snapshot. The running station can continue writing
@@ -39,6 +39,12 @@ default port with SSH:
 ```sh
 ssh -L 8765:127.0.0.1:8765 station-user@station
 ```
+
+When the binding in `weewx.conf` points to MySQL, Archivecheck connects with
+the settings from that file. It copies the archive table and its daily summaries
+into a temporary SQLite snapshot and works on that copy. This needs the MySQL
+driver WeeWX already uses, mysqlclient or PyMySQL. The copy is consistent for
+InnoDB tables, the WeeWX default.
 
 You can also pass a SQLite file directly with `--database /path/to/weewx.sdb`.
 This mode needs only Python's standard library and can run on another computer.
@@ -163,6 +169,35 @@ It rebuilds the affected scalar daily summaries for the transferred observations
 other summary tables in place. Download the result before stopping the server;
 temporary copies are removed when it stops.
 
+## Load a correction into MySQL
+
+The corrected copy is a SQLite file, also for a MySQL station. To use it, create
+an empty database on the same server, and give the MySQL account from
+`weewx.conf` access to it:
+
+```sql
+CREATE DATABASE weewx_corrected;
+GRANT ALL ON weewx_corrected.* TO 'weewx'@'localhost';
+```
+
+Then copy the corrected tables into it:
+
+```sh
+python3 archivecheck.py copy-to-mysql --config ~/weewx-data/weewx.conf \
+    --input archive-corrected.sdb --target weewx_corrected
+```
+
+Each table gets the definition of the station's table, so column types, keys
+and the storage engine stay the same. The command compares row counts after
+copying. It refuses a target database that already contains tables, and it
+leaves the station database unchanged.
+
+To switch the station to the corrected data, stop WeeWX, set
+`database_name = weewx_corrected` in the MySQL entry under `[Databases]` in
+`weewx.conf`, and start WeeWX again. The copy lacks records the station wrote
+after the snapshot. For a final correction, stop WeeWX before starting
+Archivecheck.
+
 ## Keep a backup
 
 Every correction export automatically creates a permanent backup in
@@ -179,6 +214,10 @@ command, to capture newer records.
 The interface shows the saved path and a download link after an export.
 You can also use **Create backup** without preparing a correction. Backups
 remain on disk after the server stops; only their session download links expire.
+For a MySQL archive, backups go to `archivecheck-backups/` beside `weewx.conf`.
+They are SQLite files with the archive table and its daily summaries, not a
+dump of the MySQL database.
+
 Read an existing backup with `analyze --database /path/to/backup.sdb`, or use
 the normal [WeeWX restore procedure](https://github.com/weewx/weewx/blob/master/docs_src/usersguide/backup.md).
 
@@ -228,10 +267,10 @@ the full list of arguments. Common source options are `--database` or `--config`
 seconds, `YYYY-mm-dd`, or `YYYY-mm-ddTHH:MM[:SS]`. A date-only `--to` includes
 that entire UTC day. The server port defaults to 8765.
 
-This version analyzes SQLite archives and merges numeric scalar observations
+This version analyzes SQLite and MySQL archives and merges numeric scalar observations
 on an explicitly selected archive grid or to the nearest existing weather record.
 It requires a single `dateTime`
 primary key for merging. Archive triggers, wind vector summary corrections and
-unrecognized daily summary layouts require separate review. MySQL archives can
-be inspected after exporting a SQLite copy. No interpolation or automatic
+unrecognized daily summary layouts require separate review. Archivecheck does
+not read MySQL archives with triggers on their tables. No interpolation or automatic
 inference of measurement-time meaning is performed.

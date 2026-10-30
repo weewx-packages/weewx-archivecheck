@@ -1,3 +1,8 @@
+Unreleased
+  Read MySQL archives through a weewx.conf binding into a consistent SQLite snapshot.
+  Add copy-to-mysql, which loads a corrected copy into a new, empty MySQL database.
+  MySQL backups go beside weewx.conf.
+
 0.1.1 (2026-10-29)
   First standalone release.
   Inspect field coverage, archive alignment and example rows from a SQLite snapshot.

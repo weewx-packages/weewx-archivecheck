@@ -1,6 +1,6 @@
 # Archivecheck
 
-Inspect missing observations and timestamp offsets in a WeeWX SQLite archive.
+Inspect missing observations and timestamp offsets in a WeeWX SQLite or MySQL archive.
 Preview record alignment and aggregation, then export a corrected database with
 an automatic verified backup. The interface reads a snapshot and leaves the
 original database unchanged.
@@ -9,8 +9,11 @@ Developed for the WeeWX packages organization.
 
 ## Requirements
 
-- Read access to the source SQLite archive and write access to the backup directory.
+- Read access to the source archive and write access to the backup directory.
 - No Python package beyond WeeWX. The `--database` mode uses only Python's standard library.
+- MySQL archives: the MySQL driver WeeWX uses (mysqlclient or PyMySQL). The account
+  from `weewx.conf` needs read access. Loading a correction back needs an empty
+  database the account can write to.
 
 ## Installation
 
@@ -38,9 +41,11 @@ step-by-step guide also appears at the top of the web interface.
 
 ## Limitations
 
-Corrections support numeric scalar observations in SQLite archives with a single
-`dateTime` primary key. MySQL archives require a SQLite export first. Archive
-triggers, wind vector summaries and unrecognized daily summary layouts need
+Corrections support numeric scalar observations in archives with a single
+`dateTime` primary key. For MySQL, Archivecheck reads only the archive table and
+its daily summaries, through `--config`. Corrected copies and backups are SQLite
+files; `copy-to-mysql` loads a corrected copy into a new MySQL database. MySQL
+archives with triggers are not read. SQLite archive triggers, wind vector summaries and unrecognized daily summary layouts need
 separate review. The tool does not infer measurement-time meaning or choose an
 aggregation method from an observation name.
 

@@ -22,6 +22,7 @@ class ArchivecheckInstaller(weecfg.extension.ExtensionInstaller):
                     'bin/user/archivechecklib/__init__.py',
                     'bin/user/archivechecklib/archive.py',
                     'bin/user/archivechecklib/cli.py',
+                    'bin/user/archivechecklib/mysqlsource.py',
                     'bin/user/archivechecklib/web.py']),
                 ('bin/user/archivechecklib/static', [
                     'bin/user/archivechecklib/static/index.html',

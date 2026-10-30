@@ -560,7 +560,7 @@ def test_weewx_binding_resolution_does_not_open_or_change_the_database(database,
                              ' [[SQLite]]\n  driver = weedb.sqlite\n  SQLITE_ROOT = .\n' % tmp_path)
     options = archive_cli.build_parser().parse_args(['analyze', '--config', str(configuration)])
     before = digest(database)
-    path, table = archive_cli.resolve_source(options)
+    path, table, directory = archive_cli.resolve_source(options)
     assert os.path.realpath(path) == database
     assert table == 'archive'
     assert digest(database) == before
@@ -785,3 +785,62 @@ def test_http_failed_correction_still_offers_the_backup(database, tmp_path):
         server.shutdown()
         worker.join(timeout=5)
         server.server_close()
+
+
+def test_mysql_binding_resolves_without_connecting(tmp_path):
+    configuration = tmp_path / 'weewx.conf'
+    configuration.write_text('WEEWX_ROOT = %s\n[DataBindings]\n'
+                             ' [[wx_binding]]\n  database = weather\n  table_name = archive\n'
+                             '[Databases]\n [[weather]]\n  database_type = MySQL\n'
+                             '  database_name = weewx\n[DatabaseTypes]\n'
+                             ' [[MySQL]]\n  driver = weedb.mysql\n  host = 192.0.2.1\n'
+                             '  user = weewx\n  password = secret\n' % tmp_path)
+    options = archive_cli.build_parser().parse_args(['analyze', '--config', str(configuration)])
+    source, table, directory = archive_cli.resolve_source(options)
+    assert (source['driver'], source['database_name'], source['host']) == ('weedb.mysql', 'weewx', '192.0.2.1')
+    assert (table, directory) == ('archive', str(tmp_path))
+
+
+@pytest.mark.skipif(not os.environ.get('ARCHIVECHECK_TEST_MYSQL'),
+                    reason='Set ARCHIVECHECK_TEST_MYSQL=host:port:user:password for a scratch server.')
+def test_mysql_archive_round_trip(database, tmp_path):
+    import pymysql
+    host, port, user, password = os.environ['ARCHIVECHECK_TEST_MYSQL'].split(':', 3)
+    suffix = os.urandom(4).hex()
+    station, corrected = 'archivecheck_station_' + suffix, 'archivecheck_corrected_' + suffix
+    server = pymysql.connect(host=host, port=int(port), user=user, password=password, autocommit=True)
+    cursor = server.cursor()
+    try:
+        cursor.execute('CREATE DATABASE %s' % station)
+        cursor.execute('CREATE DATABASE %s' % corrected)
+        cursor.execute('CREATE TABLE %s.archive (dateTime INT NOT NULL PRIMARY KEY, usUnits INT NOT NULL, '
+                       '`interval` INT NOT NULL, outTemp DOUBLE, energyprod DOUBLE, power DOUBLE, '
+                       'note VARCHAR(20))' % station)
+        with contextlib.closing(sqlite3.connect(database)) as source:
+            cursor.executemany('INSERT INTO %s.archive VALUES (%%s,%%s,%%s,%%s,%%s,%%s,%%s)' % station,
+                               source.execute('SELECT * FROM archive').fetchall())
+        configuration = tmp_path / 'weewx.conf'
+        configuration.write_text('WEEWX_ROOT = %s\n[DataBindings]\n'
+                                 ' [[wx_binding]]\n  database = weather\n  table_name = archive\n'
+                                 '[Databases]\n [[weather]]\n  database_type = MySQL\n'
+                                 '  database_name = %s\n[DatabaseTypes]\n'
+                                 ' [[MySQL]]\n  driver = weedb.mysql\n  host = %s\n  port = %s\n'
+                                 '  user = %s\n  password = %s\n' % (
+                                     tmp_path, station, host, port, user, password))
+        plan_path = str(tmp_path / 'plan.json')
+        output = str(tmp_path / 'corrected.sdb')
+        archive_cli.main(['dry-run', '--config', str(configuration), '--fields', 'energyprod,power',
+                          '--json', plan_path])
+        with open(plan_path) as plan_file:
+            assert json.load(plan_file)['plan']['plan_id'] == plan_for(database)['plan_id']
+        archive_cli.main(['export', '--config', str(configuration), '--plan', plan_path, '--output', output])
+        assert os.listdir(str(tmp_path / 'archivecheck-backups'))
+        archive_cli.main(['copy-to-mysql', '--config', str(configuration), '--input', output,
+                          '--target', corrected])
+        cursor.execute('SELECT dateTime, energyprod, power FROM %s.archive ORDER BY dateTime' % corrected)
+        assert cursor.fetchall() == ((300, 100.0, 0.0), (600, 110.0, 120.0), (900, 120.0, 120.0),
+                                     (1200, 120.0, 0.0))
+    finally:
+        cursor.execute('DROP DATABASE IF EXISTS %s' % station)
+        cursor.execute('DROP DATABASE IF EXISTS %s' % corrected)
+        server.close()
