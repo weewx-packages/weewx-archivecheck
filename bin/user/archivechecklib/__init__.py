@@ -3,4 +3,4 @@
 
 """Archive analysis shared by the command line and local web interface."""
 
-__version__ = '0.1.1'
+__version__ = '0.2.0'

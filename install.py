@@ -13,7 +13,7 @@ def loader():
 class ArchivecheckInstaller(weecfg.extension.ExtensionInstaller):
     def __init__(self):
         super().__init__(
-            version='0.1.1', name='archivecheck',
+            version='0.2.0', name='archivecheck',
             description='Inspect SQLite archives, preview merges and export corrected copies.',
             author='Manuel Hilgert',
             files=[
