@@ -1,4 +1,4 @@
-Unreleased
+0.2.0 (2026-10-30)
   Read MySQL archives through a weewx.conf binding into a consistent SQLite snapshot.
   Add copy-to-mysql, which loads a corrected copy into a new, empty MySQL database.
   MySQL backups go beside weewx.conf.
